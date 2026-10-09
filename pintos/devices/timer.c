@@ -148,12 +148,12 @@ timer_interrupt (struct intr_frame *args UNUSED) {
 void
 wakeup (void) {
 
-	struct list_elem *cur = list_begin (&sleep_list); //첫 원소 가져오기
+	struct list_elem *cur = list_begin (&sleep_list); //첫 elem 가져오기
 
-	while (cur != list_end (&sleep_list)) //마지막 원소까지 반복
+	while (cur != list_end (&sleep_list))
 	 {
-		struct list_elem *next = list_next(cur);
-		struct thread *t = list_entry (cur, struct thread, elem); 
+		struct list_elem *next = list_next(cur); 
+		struct thread *t = list_entry (cur, struct thread, elem);  //elem 으로 thread 구하기
 
 		if (t->wakeup_tick <= ticks){
 			list_remove(cur);
