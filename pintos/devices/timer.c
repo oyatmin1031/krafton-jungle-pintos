@@ -28,6 +28,10 @@ static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
+static struct list sleep_list;
+
+
+
 
 /* Sets up the 8254 Programmable Interval Timer (PIT) to
    interrupt PIT_FREQ times per second, and registers the
@@ -37,7 +41,7 @@ timer_init (void) {
 	/* 8254 input frequency divided by TIMER_FREQ, rounded to
 	   nearest. */
 	uint16_t count = (1193180 + TIMER_FREQ / 2) / TIMER_FREQ;
-
+    list_init (&sleep_list);
 	outb (0x43, 0x34);    /* CW: counter 0, LSB then MSB, mode 2, binary. */
 	outb (0x40, count & 0xff);
 	outb (0x40, count >> 8);
@@ -91,10 +95,21 @@ timer_elapsed (int64_t then) {
 void
 timer_sleep (int64_t ticks) {
 	int64_t start = timer_ticks ();
-
-	ASSERT (intr_get_level () == INTR_ON);
-	while (timer_elapsed (start) < ticks)
-		thread_yield ();
+	enum intr_level old_level;  // yield 안에 있던거 yield 안써서 그대로 가져옴. 인터럽트 이전꺼 저장
+	
+	ASSERT (intr_get_level () == INTR_ON); // 인터럽트 켜진건지 확인
+	// while (timer_elapsed (start) < ticks)
+	// 	thread_yield ();
+	
+	ASSERT (!intr_context ());
+	
+    old_level = intr_disable (); // 인터럽트 허용 x
+	
+	thread_current ()->wakeup_tick = start + ticks;
+	list_push_back (&sleep_list, &thread_current ()->elem);
+	thread_block();
+	
+    intr_set_level (old_level);  // 인터럽트 원래로 복구 (허용))
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -126,6 +141,28 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 	thread_tick ();
+	wakeup ();
+}
+
+
+void
+wakeup (void) {
+
+	struct list_elem *cur = list_begin (&sleep_list); //첫 원소 가져오기
+
+	while (cur != list_end (&sleep_list)) //마지막 원소까지 반복
+	 {
+		struct list_elem *next = list_next(cur);
+		struct thread *t = list_entry (cur, struct thread, elem); 
+
+		if (t->wakeup_tick <= ticks){
+			list_remove(cur);
+			thread_unblock(t);
+		}
+		cur = next;
+		// TODO: t의 wakeup_tick이 지났으면 -> sleep_list에서 빼고 + unblock
+		// TODO: 아니면 -> 다음 칸으로
+	}
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

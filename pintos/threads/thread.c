@@ -28,6 +28,7 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -55,6 +56,8 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
 bool thread_mlfqs;
 
 static void kernel_thread (thread_func *, void *aux);
+
+static void wakeup (void); // 새로 추가
 
 static void idle (void *aux UNUSED);
 static struct thread *next_thread_to_run (void);
@@ -153,6 +156,7 @@ thread_tick (void) {
 	if (++thread_ticks >= TIME_SLICE)
 		intr_yield_on_return ();
 }
+
 
 /* Prints thread statistics. */
 void
