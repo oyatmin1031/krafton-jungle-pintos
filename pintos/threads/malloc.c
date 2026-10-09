@@ -115,7 +115,7 @@ malloc (size_t size) {
 	lock_acquire (&d->lock);
 
 	/* If the free list is empty, create a new arena. */
-	if (list_empty (&d->free_list)) {
+	if (is_list_empty (&d->free_list)) {
 		size_t i;
 
 		/* Allocate a page. */
