@@ -260,8 +260,6 @@ thread_sleep (int64_t ticks) {
 	cur_thread->wakeup_tick = ticks;
 	list_push_back(&sleep_list, &cur_thread->elem);
 	thread_block();
-
-	intr_enable();
 }
 
 /* sleep_list에서 ready로 바꿀 스레드를 검색 */
