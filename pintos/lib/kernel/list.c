@@ -196,8 +196,7 @@ list_push_front (struct list *list, struct list_elem *elem) {
 	list_insert (list_begin (list), elem);
 }
 
-/* Inserts ELEM at the end of LIST, so that it becomes the
-   back in LIST. */
+/* elem을 list의 끝에 삽입*/
 void
 list_push_back (struct list *list, struct list_elem *elem) {
 	list_insert (list_end (list), elem);
@@ -267,7 +266,7 @@ list_pop_back (struct list *list) {
    Undefined behavior if LIST is empty. */
 struct list_elem *
 list_front (struct list *list) {
-	ASSERT (!list_empty (list));
+	ASSERT (!is_list_empty (list));
 	return list->head.next;
 }
 
@@ -275,7 +274,7 @@ list_front (struct list *list) {
    Undefined behavior if LIST is empty. */
 struct list_elem *
 list_back (struct list *list) {
-	ASSERT (!list_empty (list));
+	ASSERT (!is_list_empty (list));
 	return list->tail.prev;
 }
 
@@ -293,7 +292,7 @@ list_size (struct list *list) {
 
 /* Returns true if LIST is empty, false otherwise. */
 bool
-list_empty (struct list *list) {
+is_list_empty (struct list *list) {
 	return list_begin (list) == list_end (list);
 }
 
@@ -308,7 +307,7 @@ swap (struct list_elem **a, struct list_elem **b) {
 /* Reverses the order of LIST. */
 void
 list_reverse (struct list *list) {
-	if (!list_empty (list)) {
+	if (!is_list_empty (list)) {
 		struct list_elem *e;
 
 		for (e = list_begin (list); e != list_end (list); e = e->prev)
@@ -441,7 +440,7 @@ list_unique (struct list *list, struct list *duplicates,
 
 	ASSERT (list != NULL);
 	ASSERT (less != NULL);
-	if (list_empty (list))
+	if (is_list_empty (list))
 		return;
 
 	elem = list_begin (list);

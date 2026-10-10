@@ -49,7 +49,7 @@ static bool format_filesys;
 /* -q: Power off after kernel tasks complete? */
 bool power_off_when_done;
 
-bool thread_tests;
+bool thread_tests; /* 넌 왜 있니? */
 
 static void bss_init (void);
 static void paging_init (uint64_t mem_end);
@@ -70,19 +70,18 @@ main (void) {
 	uint64_t mem_end;
 	char **argv;
 
-	/* Clear BSS and get machine's RAM size. */
+	/* BSS를 초기화하고, 기기의 램 사이즈를 가져옴 */
 	bss_init ();
 
-	/* Break command line into arguments and parse options. */
-	argv = read_command_line ();
+	/* 명령줄을 인자들로 나누고, 옵션을 해석 */
+	argv = read_command_line (); 
 	argv = parse_options (argv);
 
-	/* Initialize ourselves as a thread so we can use locks,
-	   then enable console locking. */
+	/* 현재 실행 중인 우리 자신을 스레드로 초기화해서 lock을 사용할 수 있게 하고, 콘솔 잠금도 활성화 */
 	thread_init ();
 	console_init ();
 
-	/* Initialize memory system. */
+	/* 메모리 시스템을 초기화 */
 	mem_end = palloc_init ();
 	malloc_init ();
 	paging_init (mem_end);
@@ -92,7 +91,7 @@ main (void) {
 	gdt_init ();
 #endif
 
-	/* Initialize interrupt handlers. */
+	/* 인터럽트 핸들러 초기화 */
 	intr_init ();
 	timer_init ();
 	kbd_init ();
@@ -101,13 +100,13 @@ main (void) {
 	exception_init ();
 	syscall_init ();
 #endif
-	/* Start thread scheduler and enable interrupts. */
+	/* 스레드 스케줄러 시작, 인터럽트 활성화*/
 	thread_start ();
 	serial_init_queue ();
 	timer_calibrate ();
 
 #ifdef FILESYS
-	/* Initialize file system. */
+	/* 파일 시스템 초기화 */
 	disk_init ();
 	filesys_init (format_filesys);
 #endif
@@ -130,12 +129,9 @@ main (void) {
 /* Clear BSS */
 static void
 bss_init (void) {
-	/* The "BSS" is a segment that should be initialized to zeros.
-	   It isn't actually stored on disk or zeroed by the kernel
-	   loader, so we have to zero it ourselves.
-
-	   The start and end of the BSS segment is recorded by the
-	   linker as _start_bss and _end_bss.  See kernel.lds. */
+	/* BSS는 0으로 초기화해야 하는 메모리 영역이다. 
+	   이 영역의 내용은 디스크에 실제로 저장되어 있지 않고, 
+	   커널 로더도 0으로 초기화하지 않으므로 우리가 직접 0으로 채워야 한다*/
 	extern char _start_bss, _end_bss;
 	memset (&_start_bss, 0, &_end_bss - &_start_bss);
 }
