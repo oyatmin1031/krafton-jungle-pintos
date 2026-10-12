@@ -32,6 +32,29 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+int 
+get_max_donation_priority(struct thread *t) {
+	int max = -1;
+	struct list_elem* lock_elem = list_begin(&t->held_locks);
+
+	while(lock_elem != list_tail(&t->held_locks)) {
+		struct semaphore* sema = &list_entry(lock_elem, struct lock, elem)->semaphore;
+		struct list_elem* waiters_elem = list_begin(&sema->waiters);
+		lock_elem = list_next(lock_elem);
+		while(waiters_elem != list_tail(&sema->waiters)) {
+			int temp = list_entry(waiters_elem, struct thread, elem)->priority;
+			if (max < temp) {
+				max = temp;
+			}
+			waiters_elem = list_next(waiters_elem);
+		}
+	}
+	// if (max != -1 && max < t->priority) {
+	// 	max = t->priority;
+	// }
+	return max;
+}
+
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -109,9 +132,11 @@ sema_up (struct semaphore *sema) {
 	ASSERT (sema != NULL);
 
 	old_level = intr_disable ();
-	if (!is_list_empty (&sema->waiters))
+	if (!is_list_empty (&sema->waiters)) {
+		list_sort(&sema->waiters, thread_priority_more, NULL);
 		thread_unblock (list_entry (list_pop_front (&sema->waiters),
 					struct thread, elem));
+	}
 	sema->value++;
 	intr_set_level (old_level);
 }
@@ -188,8 +213,23 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
 
+	struct thread* lock_thread = lock->holder;
+	if (lock_thread != NULL) {
+		int max_priority = get_max_donation_priority(lock_thread);
+		if (max_priority < thread_current()->priority){
+			max_priority = thread_current()->priority;
+		}
+		if (max_priority != -1) {
+			lock_thread->priority = max_priority;
+		}
+	}
+	
 	sema_down (&lock->semaphore);
 	lock->holder = thread_current ();
+	list_push_back(&lock->holder->held_locks, &lock->elem);
+
+	/* TODO: 획득하려는 락을 소유한 락을 먼저 실행해야 함. */
+	/* TODO: get_max...로 priority를 변경. */
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -222,8 +262,14 @@ lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
+	struct thread* lock_thread = lock->holder;
+	/* TODO: 우선순위 복구 */
 	lock->holder = NULL;
 	sema_up (&lock->semaphore);
+
+	list_remove(&lock->elem);
+	lock_thread->priority = lock_thread->base_priority;
+	thread_yield();
 }
 
 /* Returns true if the current thread holds LOCK, false
@@ -318,6 +364,8 @@ cond_broadcast (struct condition *cond, struct lock *lock) {
 	ASSERT (cond != NULL);
 	ASSERT (lock != NULL);
 
-	while (!is_list_empty (&cond->waiters))
+	while (!is_list_empty (&cond->waiters)) {
+		list_sort(&cond->waiters, thread_priority_more, NULL);
 		cond_signal (cond, lock);
+	}
 }

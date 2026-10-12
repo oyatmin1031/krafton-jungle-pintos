@@ -357,8 +357,15 @@ void
 thread_set_priority (int new_priority) {
 	enum intr_level old_level = intr_disable ();
 	
-	thread_current ()->priority = new_priority;
+	struct thread* cur_thread = thread_current();
+	cur_thread->base_priority = new_priority;
+	if (cur_thread->priority < new_priority) {
+		cur_thread->priority = new_priority;
+	}
 	
+	/* TODO: 우선순위 변경 시 기부 발생 확인 후 처리 */
+	/* TODO: donated_priority 값이 priority보다 작은 경우도 생각해봐야 함. */
+
 	if (!is_list_empty(&ready_list)) {
 		struct thread *next = list_entry(list_front(&ready_list), struct thread, elem);
 		if (next->priority > new_priority) {
@@ -372,6 +379,10 @@ thread_set_priority (int new_priority) {
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) {
+	/* TODO: thread에 donated_thread가 있다면 그 값을 읽음 아니면 */
+	struct thread* cur_thread = thread_current();
+
+	// if (cur_thread->priority )
 	return thread_current ()->priority;
 }
 
@@ -463,7 +474,9 @@ init_thread (struct thread *t, const char *name, int priority) {
 	strlcpy (t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
+	t->base_priority = priority;
 	t->magic = THREAD_MAGIC;
+	list_init(&t->held_locks);
 }
 
 /* ready list로 이동할 다음 스레드를 선택하고 반환.
