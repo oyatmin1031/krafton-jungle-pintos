@@ -49,9 +49,6 @@ get_max_donation_priority(struct thread *t) {
 			waiters_elem = list_next(waiters_elem);
 		}
 	}
-	// if (max != -1 && max < t->priority) {
-	// 	max = t->priority;
-	// }
 	return max;
 }
 
@@ -268,7 +265,14 @@ lock_release (struct lock *lock) {
 	sema_up (&lock->semaphore);
 
 	list_remove(&lock->elem);
-	lock_thread->priority = lock_thread->base_priority;
+	/* TODO: 더 높은 우선순위를 가진 스레드가 있는지 검사 필요 */
+	int max = get_max_donation_priority(lock_thread);
+	if(max == -1) {
+		lock_thread->priority = lock_thread->base_priority;
+	} else {
+		lock_thread->priority = max;
+	}
+	
 	thread_yield();
 }
 
