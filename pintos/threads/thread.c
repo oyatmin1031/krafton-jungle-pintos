@@ -358,17 +358,18 @@ thread_set_priority (int new_priority) {
 	enum intr_level old_level = intr_disable ();
 	
 	struct thread* cur_thread = thread_current();
+	
 	cur_thread->base_priority = new_priority;
-	if (cur_thread->priority < new_priority) {
-		cur_thread->priority = new_priority;
-	}
+
+	int donated_priority = get_max_donation_priority(cur_thread);
+	cur_thread->priority = new_priority > donated_priority ? new_priority : donated_priority;
 	
 	/* TODO: 우선순위 변경 시 기부 발생 확인 후 처리 */
 	/* TODO: donated_priority 값이 priority보다 작은 경우도 생각해봐야 함. */
 
 	if (!is_list_empty(&ready_list)) {
 		struct thread *next = list_entry(list_front(&ready_list), struct thread, elem);
-		if (next->priority > new_priority) {
+		if (next->priority > cur_thread->priority) {
 			thread_yield();
 		}
 	}
