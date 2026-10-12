@@ -125,16 +125,25 @@ sema_try_down (struct semaphore *sema) {
 void
 sema_up (struct semaphore *sema) {
 	enum intr_level old_level;
+	struct list_elem* front = NULL;
 
 	ASSERT (sema != NULL);
 
 	old_level = intr_disable ();
 	if (!is_list_empty (&sema->waiters)) {
 		list_sort(&sema->waiters, thread_priority_more, NULL);
-		thread_unblock (list_entry (list_pop_front (&sema->waiters),
+		front = list_pop_front (&sema->waiters); 
+		thread_unblock (list_entry (front,
 					struct thread, elem));
 	}
+
 	sema->value++;
+	
+	if (front != NULL) {
+		if(thread_current()->priority < list_entry(front, struct thread, elem)->priority) {
+			thread_yield();
+		}
+	}
 	intr_set_level (old_level);
 }
 
@@ -196,6 +205,20 @@ lock_init (struct lock *lock) {
 	sema_init (&lock->semaphore, 1);
 }
 
+void lock_donation(struct lock *lock) {
+	struct thread* lock_thread = lock->holder;
+
+	if (lock_thread != NULL) {
+		int max_priority = get_max_donation_priority(lock_thread);
+		if (max_priority < thread_current()->priority){
+			max_priority = thread_current()->priority;
+		}
+		if (max_priority != -1 && lock_thread->priority < max_priority) {
+			lock_thread->priority = max_priority;
+		}
+	}
+}
+
 /* Acquires LOCK, sleeping until it becomes available if
    necessary.  The lock must not already be held by the current
    thread.
@@ -209,24 +232,18 @@ lock_acquire (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
+	enum intr_level old_level;
 
-	struct thread* lock_thread = lock->holder;
-	if (lock_thread != NULL) {
-		int max_priority = get_max_donation_priority(lock_thread);
-		if (max_priority < thread_current()->priority){
-			max_priority = thread_current()->priority;
-		}
-		if (max_priority != -1) {
-			lock_thread->priority = max_priority;
-		}
-	}
+	ASSERT (!intr_context());
+
+	old_level=intr_disable();
+
+	lock_donation(lock);
 	
 	sema_down (&lock->semaphore);
 	lock->holder = thread_current ();
 	list_push_back(&lock->holder->held_locks, &lock->elem);
-
-	/* TODO: 획득하려는 락을 소유한 락을 먼저 실행해야 함. */
-	/* TODO: get_max...로 priority를 변경. */
+	intr_set_level(old_level);
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -259,21 +276,28 @@ lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
+	enum intr_level old_level;
+
+	ASSERT (!intr_context());
+
+	old_level=intr_disable();
 	struct thread* lock_thread = lock->holder;
-	/* TODO: 우선순위 복구 */
+
+	/* 우선순위 복구 */
 	lock->holder = NULL;
 	sema_up (&lock->semaphore);
-
 	list_remove(&lock->elem);
-	/* TODO: 더 높은 우선순위를 가진 스레드가 있는지 검사 필요 */
-	int max = get_max_donation_priority(lock_thread);
-	if(max == -1) {
+
+	int max_priority = get_max_donation_priority(lock_thread);
+	if(max_priority == -1) {
 		lock_thread->priority = lock_thread->base_priority;
-	} else {
-		lock_thread->priority = max;
+	} else if (lock_thread->base_priority < max_priority){
+		lock_thread->priority = max_priority;
 	}
 	
 	thread_yield();
+
+	intr_set_level(old_level);
 }
 
 /* Returns true if the current thread holds LOCK, false
