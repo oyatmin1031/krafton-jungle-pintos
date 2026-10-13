@@ -65,6 +65,7 @@ static void init_thread (struct thread *, const char *name, int priority);
 static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
+static bool priority_check (const struct list_elem *a, const struct list_elem *b, void *aux);
 
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
@@ -207,9 +208,13 @@ thread_create (const char *name, int priority,
 	t->tf.ss = SEL_KDSEG;
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
+	
+	thread_unblock (t);  
 
 	/* Add to run queue. */
-	thread_unblock (t);
+    if (thread_current()->priority < priority) {  //언블락으로 리스트에 추가되자마자 바로 
+		thread_yield();
+	}
 
 	return tid;
 }
@@ -243,10 +248,19 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+	// list_push_back (&ready_list, &t->elem);  
+	//list_insert_ordered (&ready_list, &t->elem, list_less_func *priority_check, void *aux); // 선언 원본. 함수 호출시 함수 이름만 적기, 안쓰는 칸은 null 적기
+	list_insert_ordered (&ready_list, &t->elem, priority_check, NULL); // list_less_func 좀 더 알아봐야함. ++ list 에서 선언한걸 thread 에서 쓰기 위해 함수 책임 넘김. list 안에는 필요한 값들이 없음.
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
+
+//list_less_func 이건 함수 typedef. 인자 세가 받아 bool을 리턴하는
+static bool
+priority_check (const struct list_elem *a, const struct list_elem *b, void *aux) {
+	return list_entry(a,struct thread, elem)->priority > list_entry(b,struct thread, elem)->priority;
+}
+// 사용되는 모양은 (less (elem, e, aux)). 여기서 elem 은 넣으려고 하는 thread의 elem, e 는 첨부터 끝까지 (멈추기 전까지 순차적으로) 대입되는 변수. 
 
 /* 현재 스레드를 block으로 바꾸고,
    wakeup_tick을 ticks로 바꿈 */
@@ -273,6 +287,13 @@ void thread_wakeup (int64_t ticks) {
 			list_remove(&temp_thread->elem);
 			thread_unblock(temp_thread); 
 		}
+	}
+	
+	if (!is_list_empty (&ready_list)){
+	    if (thread_current()->priority < list_entry(list_begin(&ready_list),struct thread, elem)->priority) {  //언블락으로 리스트에 추가되자마자 바로 
+		intr_yield_on_return(); // threads->interrupt 에서 좀 더 알아보기. 바로 양보가 아니라 최소한 인터럽트는 끝나고 양보하기. 
+		//thread_yield(); 
+	}
 	}
 }
 
@@ -334,7 +355,9 @@ thread_yield (void) {
 
 	old_level = intr_disable ();
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+		// list_push_back (&ready_list, &curr->elem);
+		list_insert_ordered (&ready_list, &curr->elem, priority_check, NULL); // list_less_func 좀 더 알아봐야함
+
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -343,7 +366,15 @@ thread_yield (void) {
 void
 thread_set_priority (int new_priority) {
 	thread_current ()->priority = new_priority;
+        
+	    if (!is_list_empty (&ready_list)){
+	    if (thread_current()->priority < list_entry(list_begin(&ready_list),struct thread, elem)->priority) {
+
+			thread_yield(); // 인터럽트 내부가 아니니까
+		}
+	}
 }
+	
 
 /* Returns the current thread's priority. */
 int
