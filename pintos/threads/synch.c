@@ -332,6 +332,16 @@ struct semaphore_elem {
 	struct semaphore semaphore;         /* This semaphore. */
 };
 
+bool
+cond_priority_check (const struct list_elem *a, const struct list_elem *b, void *aux) {
+	 struct semaphore_elem *sema_a = list_entry(a, struct semaphore_elem, elem);
+	 struct semaphore_elem *sema_b = list_entry(b, struct semaphore_elem, elem);
+	 struct list_elem *thread_a = list_front(&sema_a->semaphore.waiters);
+	 struct list_elem *thread_b = list_front(&sema_b->semaphore.waiters);
+		 
+	 return list_entry(thread_a,struct thread, elem)->priority > list_entry(thread_b,struct thread, elem)->priority;
+}
+
 /* Initializes condition variable COND.  A condition variable
    allows one piece of code to signal a condition and cooperating
    code to receive the signal and act upon it. */
@@ -393,6 +403,7 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (lock_held_by_current_thread (lock));
 
 	if (!is_list_empty (&cond->waiters))
+		list_sort(&cond->waiters, cond_priority_check, NULL);
 		sema_up (&list_entry (list_pop_front (&cond->waiters),
 					struct semaphore_elem, elem)->semaphore);
 }
