@@ -108,7 +108,7 @@ thread_init (void) {
 	};
 	lgdt (&gdt_ds);
 
-	/* Init the globla thread context */
+	/* Init the global thread context */
 	lock_init (&tid_lock);
 	list_init (&ready_list);
 	list_init (&sleep_list);
@@ -211,6 +211,10 @@ thread_create (const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock (t);
 
+	if (t->priority > thread_current()->priority) {
+		thread_yield();
+	}
+
 	return tid;
 }
 
@@ -225,6 +229,13 @@ thread_block (void) {
 	ASSERT (intr_get_level () == INTR_OFF);
 	thread_current ()->status = THREAD_BLOCKED;
 	schedule ();
+}
+
+bool 
+thread_priority_more(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+	struct thread *thread_a = list_entry(a, struct thread, elem);
+	struct thread *thread_b = list_entry(b, struct thread, elem);
+	return thread_a->priority > thread_b->priority;
 }
 
 /* Transitions a blocked thread T to the ready-to-run state.
@@ -243,7 +254,8 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+	// list_push_back (&ready_list, &t->elem);
+	list_insert_ordered(&ready_list, &t->elem, thread_priority_more, NULL);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -334,7 +346,8 @@ thread_yield (void) {
 
 	old_level = intr_disable ();
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+		// list_push_back (&ready_list, &curr->elem);
+		list_insert_ordered(&ready_list, &curr->elem, thread_priority_more, NULL);
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -342,12 +355,35 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+	enum intr_level old_level = intr_disable ();
+	
+	struct thread* cur_thread = thread_current();
+	
+	cur_thread->base_priority = new_priority;
+
+	int donated_priority = get_max_donation_priority(cur_thread);
+	cur_thread->priority = new_priority > donated_priority ? new_priority : donated_priority;
+	
+	/* TODO: 우선순위 변경 시 기부 발생 확인 후 처리 */
+	/* TODO: donated_priority 값이 priority보다 작은 경우도 생각해봐야 함. */
+
+	if (!is_list_empty(&ready_list)) {
+		struct thread *next = list_entry(list_front(&ready_list), struct thread, elem);
+		if (next->priority > cur_thread->priority) {
+			thread_yield();
+		}
+	}
+
+	intr_set_level(old_level);
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) {
+	/* TODO: thread에 donated_thread가 있다면 그 값을 읽음 아니면 */
+	struct thread* cur_thread = thread_current();
+
+	// if (cur_thread->priority )
 	return thread_current ()->priority;
 }
 
@@ -439,7 +475,10 @@ init_thread (struct thread *t, const char *name, int priority) {
 	strlcpy (t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
+	t->base_priority = priority;
 	t->magic = THREAD_MAGIC;
+	list_init(&t->held_locks);
+	t->waiting_lock = NULL;
 }
 
 /* ready list로 이동할 다음 스레드를 선택하고 반환.
