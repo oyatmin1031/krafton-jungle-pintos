@@ -108,7 +108,7 @@ thread_init (void) {
 	};
 	lgdt (&gdt_ds);
 
-	/* Init the globla thread context */
+	/* Init the global thread context */
 	lock_init (&tid_lock);
 	list_init (&ready_list);
 	list_init (&sleep_list);
@@ -478,6 +478,7 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->base_priority = priority;
 	t->magic = THREAD_MAGIC;
 	list_init(&t->held_locks);
+	t->waiting_lock = NULL;
 }
 
 /* ready list로 이동할 다음 스레드를 선택하고 반환.

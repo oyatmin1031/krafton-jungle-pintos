@@ -205,16 +205,30 @@ lock_init (struct lock *lock) {
 	sema_init (&lock->semaphore, 1);
 }
 
+void donate_priority(struct thread* t){
+	int max_priority = get_max_donation_priority(t);
+	if (max_priority < thread_current()->priority){
+		max_priority = thread_current()->priority;
+	}
+	if (max_priority != -1 && t->priority < max_priority) {
+		t->priority = max_priority;
+	}
+}
+
 void lock_donation(struct lock *lock) {
 	struct thread* lock_thread = lock->holder;
 
 	if (lock_thread != NULL) {
-		int max_priority = get_max_donation_priority(lock_thread);
-		if (max_priority < thread_current()->priority){
-			max_priority = thread_current()->priority;
-		}
-		if (max_priority != -1 && lock_thread->priority < max_priority) {
-			lock_thread->priority = max_priority;
+		donate_priority(lock_thread);
+
+		/* nest */
+		struct lock* waiting_lock = lock_thread->waiting_lock;
+		while(waiting_lock != NULL && waiting_lock->holder != NULL) {
+			int holder_priority = waiting_lock->holder->priority;
+			struct thread* waiting_holder = waiting_lock->holder;
+
+			donate_priority(waiting_holder);
+			waiting_lock = waiting_holder->waiting_lock;
 		}
 	}
 }
@@ -238,10 +252,12 @@ lock_acquire (struct lock *lock) {
 
 	old_level=intr_disable();
 
+	thread_current()->waiting_lock = lock;
 	lock_donation(lock);
 	
 	sema_down (&lock->semaphore);
 	lock->holder = thread_current ();
+
 	list_push_back(&lock->holder->held_locks, &lock->elem);
 	intr_set_level(old_level);
 }
