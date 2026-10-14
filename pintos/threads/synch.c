@@ -32,6 +32,8 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+/* 주어진 스레드가 소유한 락들 중에서 기부된 우선순위의 최대값을 반환한다.
+   만약 기부된 우선순위가 없다면 -1을 반환한다. */
 int 
 get_max_donation_priority(struct thread *t) {
 	int max = -1;
@@ -76,7 +78,13 @@ sema_init (struct semaphore *sema, unsigned value) {
    interrupt handler.  This function may be called with
    interrupts disabled, but if it sleeps then the next scheduled
    thread will probably turn interrupts back on. This is
-   sema_down function. */
+   sema_down function. 
+   락이 사용중이면 세마포어 값이 0이 된다. 현재 스레드는 대기 목록에
+   넣고 thread_block()을 호출하여 다른 스레드를 실행시킨다. 
+   소유자가 lock_release()를 호출하면 내부의 sema_up()이 대기 스레드
+   하나를 실행 가능한 상태고 바꾸고, 깨어난 스레드가 CPU를 받으면
+   세마포어 값을 다시 확인하여 획득할 수 있으면 값을 감소시키고
+   sema_down()에서 돌아가 원래 코드를 진행한다. */
 void
 sema_down (struct semaphore *sema) {
 	enum intr_level old_level;
@@ -86,6 +94,7 @@ sema_down (struct semaphore *sema) {
 
 	old_level = intr_disable ();
 	while (sema->value == 0) {
+		/* 현재 스레드가 락을 기다리고 있음을 기록 */
 		list_push_back (&sema->waiters, &thread_current ()->elem);
 		thread_block ();
 	}
@@ -121,7 +130,8 @@ sema_try_down (struct semaphore *sema) {
 /* Up or "V" operation on a semaphore.  Increments SEMA's value
    and wakes up one thread of those waiting for SEMA, if any.
 
-   This function may be called from an interrupt handler. */
+   This function may be called from an interrupt handler. 
+   소유자가 락을 해제할 때 호출된다. */
 void
 sema_up (struct semaphore *sema) {
 	enum intr_level old_level;
@@ -130,6 +140,8 @@ sema_up (struct semaphore *sema) {
 	ASSERT (sema != NULL);
 
 	old_level = intr_disable ();
+
+	/* 기다리고 있는 스레드가 있을 때 우선순위가 가장 높은 스레드를 깨운다. */
 	if (!is_list_empty (&sema->waiters)) {
 		list_sort(&sema->waiters, thread_priority_more, NULL);
 		front = list_pop_front (&sema->waiters); 
@@ -139,9 +151,15 @@ sema_up (struct semaphore *sema) {
 
 	sema->value++;
 	
+	/* 깨운 스레드가 있을때 현재 스레드의 우선순위가 더 낮으면 양보한다. */
 	if (front != NULL) {
 		if(thread_current()->priority < list_entry(front, struct thread, elem)->priority) {
-			thread_yield();
+			/* 외부 인터럽트 처리 중에는 처리를 마친 후 양보한다. */
+			if(intr_context()) {
+				intr_yield_on_return();
+			} else {
+			    thread_yield();
+			}
 		}
 	}
 	intr_set_level (old_level);
@@ -205,6 +223,7 @@ lock_init (struct lock *lock) {
 	sema_init (&lock->semaphore, 1);
 }
 
+/* 기부된 우선순위를 설정한다. */
 void donate_priority(struct thread* t){
 	int max_priority = get_max_donation_priority(t);
 	if (max_priority < thread_current()->priority){
@@ -215,6 +234,7 @@ void donate_priority(struct thread* t){
 	}
 }
 
+/* 락을 획득할 때 우선순위를 기부한다. */
 void lock_donation(struct lock *lock) {
 	struct thread* lock_thread = lock->holder;
 
@@ -252,11 +272,13 @@ lock_acquire (struct lock *lock) {
 
 	old_level=intr_disable();
 
-	thread_current()->waiting_lock = lock;
+	thread_current()->waiting_lock = lock; /* 기다리는 락을 설정 */
 	lock_donation(lock);
 	
 	sema_down (&lock->semaphore);
+	/* sema_down을 통해 락을 소유했음을 확인했으므로 스레드를 락의 소유자로 기록 */
 	lock->holder = thread_current ();
+	thread_current()->waiting_lock = NULL; /* 기다리는 락을 해제 */
 
 	list_push_back(&lock->holder->held_locks, &lock->elem);
 	intr_set_level(old_level);
@@ -302,10 +324,12 @@ lock_release (struct lock *lock) {
 	/* 우선순위 복구 */
 	lock->holder = NULL;
 	sema_up (&lock->semaphore);
-	list_remove(&lock->elem);
+	list_remove(&lock->elem); /* 락을 소유한 스레드의 held_locks 목록에서 제거 */
 
+	/* 기부된 우선순위가 있는 경우, 최대 기부 우선순위로 복구.
+	   만약 기부된 우선순위가 없거나 기존 우선순위가 더 높다면 기존 우선순위로 복구 */
 	int max_priority = get_max_donation_priority(lock_thread);
-	if(max_priority == -1) {
+	if(max_priority == -1 || lock_thread->base_priority > max_priority) {
 		lock_thread->priority = lock_thread->base_priority;
 	} else if (lock_thread->base_priority < max_priority){
 		lock_thread->priority = max_priority;
@@ -332,6 +356,7 @@ struct semaphore_elem {
 	struct semaphore semaphore;         /* This semaphore. */
 };
 
+/* 조건 변수의 우선순위를 확인. */
 bool
 cond_priority_check (const struct list_elem *a, const struct list_elem *b, void *aux) {
 	 struct semaphore_elem *sema_a = list_entry(a, struct semaphore_elem, elem);
@@ -402,10 +427,11 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (!intr_context ());
 	ASSERT (lock_held_by_current_thread (lock));
 
-	if (!is_list_empty (&cond->waiters))
+	if (!is_list_empty (&cond->waiters)) {
 		list_sort(&cond->waiters, cond_priority_check, NULL);
 		sema_up (&list_entry (list_pop_front (&cond->waiters),
 					struct semaphore_elem, elem)->semaphore);
+	}
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by

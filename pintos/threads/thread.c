@@ -254,7 +254,7 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	// list_push_back (&ready_list, &t->elem);
+	
 	list_insert_ordered(&ready_list, &t->elem, thread_priority_more, NULL);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
@@ -363,9 +363,9 @@ thread_set_priority (int new_priority) {
 
 	int donated_priority = get_max_donation_priority(cur_thread);
 	cur_thread->priority = new_priority > donated_priority ? new_priority : donated_priority;
-	
-	/* TODO: 우선순위 변경 시 기부 발생 확인 후 처리 */
-	/* TODO: donated_priority 값이 priority보다 작은 경우도 생각해봐야 함. */
+
+	/* 우선순위가 변경되었으므로 준비 리스트에 있는 스레드와 비교하여 재정렬 */
+	list_sort(&ready_list, thread_priority_more, NULL);
 
 	if (!is_list_empty(&ready_list)) {
 		struct thread *next = list_entry(list_front(&ready_list), struct thread, elem);
